@@ -1,0 +1,19 @@
+﻿[
+  {
+    "TitleId": 1,
+    "Title": "Jammu-kashi",
+    "Description": "Jammu to Kashi spritural journey",
+    "FromPlace": "Jammu",
+    "ToPlace": "Kashi",
+    "TravelDate": "2025-10-01T00:00:00",
+    "TotalSeats": 50,
+    "AvailableSeats": 50,
+    "Price": 500,
+    "ImageUrl": "https://example.com/jammu-kashi.jpg",
+
+  },
+  {
+
+  }
+]
+        
