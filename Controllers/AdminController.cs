@@ -8,6 +8,7 @@ using BusServices.Dtos;
 using BusServices.IServiceContracts;
 using BusServices.Models;
 using CloudinaryDotNet.Actions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -19,6 +20,7 @@ namespace BusServices.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize(Roles = "Admin")]
     public class AdminController : ControllerBase
     {
         private readonly IPhotoService _photoService;
@@ -128,6 +130,7 @@ namespace BusServices.Controllers
         //}
 
         [HttpPost("[action]")]
+        
         public async Task<IActionResult> CreateNewEvent([FromBody] CreateEventDto eventdto)
         {
             if (string.IsNullOrEmpty(eventdto.Title) || eventdto.TravelDate == null)
@@ -513,6 +516,7 @@ namespace BusServices.Controllers
         }
 
         //[Cached(600)]
+        [AllowAnonymous]
         [HttpGet("[action]")]
         public IActionResult GetBusTypes()
         {
@@ -520,6 +524,7 @@ namespace BusServices.Controllers
         }
         [HttpGet("[action]")]
         //[Cached(600)]
+        [AllowAnonymous]
         public IActionResult GetBusCategoryies()
         {
             return Ok(_context.BusCategory.ToList());
