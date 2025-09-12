@@ -1,70 +1,80 @@
-﻿using Microsoft.OpenApi.Exceptions;
+﻿using BusServcies.Errors;
+using System.Net;
+using System.Text.Json;
 
 namespace BusServcies.Middleware
 {
- public class ExceptionHandlingMiddleware : IMiddleware
- {
-  private readonly ILogger<Exception> _logger;
-  //private readonly IDiagnosticContext _diagnosticContext;
 
-  public ExceptionHandlingMiddleware(ILogger<Exception> logger)
-  {
-   _logger = logger;
-   //_diagnosticContext = diagnosticContext;
-  }
-
-
-  public async Task InvokeAsync(HttpContext context, RequestDelegate next)
-  {
-   try
-   {
-    await next(context);
-   }
-   //catch (FinnhubException ex)
-   //{
-   // LogException(ex);
-
-   // //context.Response.StatusCode = 500;
-   // //await context.Response.WriteAsync(ex.Message);
-
-   // throw;
-   //}
-   catch (Exception ex)
-   {
-    LogException(ex);
-
-    //context.Response.StatusCode = 500;
-    //await context.Response.WriteAsync(ex.Message);
-
-    throw;
-   }
-  }
-
-
-
-  private void LogException(Exception ex)
-  {
-   if (ex.InnerException != null)
-   {
-    if (ex.InnerException.InnerException != null)
+    public class ExceptionHandlingMiddleware
     {
-     _logger.LogError("{ExceptionType} {ExceptionMessage}", ex.InnerException.InnerException.GetType().ToString(), ex.InnerException.InnerException.Message);
+        private readonly RequestDelegate _next;
+        private readonly ILogger<ExceptionHandlingMiddleware> _logger;
+        private readonly IHostEnvironment _env;
 
-     //_diagnosticContext.Set("Exception", $"{ex.InnerException.InnerException.GetType().ToString()}, {ex.InnerException.InnerException.Message}, {ex.InnerException.InnerException.StackTrace}");
+        public ExceptionHandlingMiddleware(RequestDelegate next, ILogger<ExceptionHandlingMiddleware> logger, IHostEnvironment env)
+        {
+            _next = next;
+            _logger = logger;
+            _env = env;
+        }
+
+        public async Task InvokeAsync(HttpContext context)
+        {
+            try
+            {
+                await _next(context);
+            }
+            catch (Exception ex)
+            {
+                LogException(ex); // custom logger method
+
+                context.Response.ContentType = "application/json";
+                context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+
+                // In development → show detailed info
+                // In production → safe message only
+                var response = _env.IsDevelopment()
+                    ? new ApiException(context.Response.StatusCode, ex.Message, ex.StackTrace?.ToString())
+                    : new ApiException((int)HttpStatusCode.InternalServerError);
+
+                //: new ApiException(context.Response.StatusCode, "An unexpected error occurred.", "Internal server error");
+
+                var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+                var json = JsonSerializer.Serialize(response, options);
+                await context.Response.WriteAsync(json);
+            }
+        }
+
+        private void LogException(Exception ex)
+        {
+            // Logs deepest inner exception first (like your first version)
+            if (ex.InnerException?.InnerException != null)
+            {
+                _logger.LogError("{ExceptionType} {ExceptionMessage}", ex.InnerException.InnerException.GetType().ToString(), ex.InnerException.InnerException.Message);
+            }
+            else if (ex.InnerException != null)
+            {
+                _logger.LogError("{ExceptionType} {ExceptionMessage}", ex.InnerException.GetType().ToString(), ex.InnerException.Message);
+            }
+            else
+            {
+                _logger.LogError("{ExceptionType} {ExceptionMessage}", ex.GetType().ToString(), ex.Message);
+            }
+        }
     }
-    else
-    {
-     _logger.LogError("{ExceptionType} {ExceptionMessage}", ex.InnerException.GetType().ToString(), ex.InnerException.Message);
 
-     //_diagnosticContext.Set("Exception", $"{ex.InnerException.GetType().ToString()}, {ex.InnerException.Message}, {ex.InnerException.StackTrace}");
-    }
-   }
-   else
-   {
-    _logger.LogError("{ExceptionType} {ExceptionMessage}", ex.GetType().ToString(), ex.Message);
+    // Response model
+    //public class ApiException
+    //{
+    //    public ApiException(int statusCode, string message = null, string details = null)
+    //    {
+    //        StatusCode = statusCode;
+    //        Message = message;
+    //        Details = details;
+    //    }
 
-    //_diagnosticContext.Set("Exception", $"{ex.GetType().ToString()}, {ex.Message}, {ex.StackTrace}");
-   }
-  }
- }
+    //    public int? StatusCode { get; set; }
+    //    public string Message { get; set; }
+    //    public string Details { get; set; }
+    //}
 }

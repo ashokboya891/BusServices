@@ -1,5 +1,6 @@
 ﻿using API.Helpers;
 using BusServcies.IServiceContracts;
+using BusServcies.Middleware;
 using BusServcies.Services;
 using BusServices.IRepositoryContracts;
 using BusServices.IServiceContracts;
@@ -7,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Serilog;
 using StackExchange.Redis;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -31,6 +33,8 @@ internal class Program
             options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
         });
 
+
+
         builder.Services.Configure<CloudinarySettings>(builder.Configuration.GetSection("CloudinarySettings"));
 
         builder.Services.AddDbContext<BusServcies.DatabaseContext.ApplicationDbContext>(options =>
@@ -50,14 +54,19 @@ internal class Program
             options.InstanceName = "BusServcie_"; // Optional prefix for keys
         });
 
+        builder.Host.UseSerilog((HostBuilderContext context, IServiceProvider Service, LoggerConfiguration config) =>
+        {
+            config.ReadFrom.Configuration(context.Configuration).ReadFrom.Services(Service);
+        });
+
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
 
         builder.Services.AddSingleton<BusServcies.IServiceContracts.IResponseCacheService,BusServcies.ServiceContracts.ReponseCacheService>();
-
         builder.Services.AddScoped<IPhotoService, PhotoService>();
         builder.Services.AddScoped<IEventRepository, BusServices.RepositoryContracts.EventRepository>();
         builder.Services.AddScoped<IEventService, BusServices.ServiceContracts.EventServcie>();
+
 
         // Add the CORS policy to the application
         builder.Services.AddCors(options =>
@@ -117,8 +126,10 @@ internal class Program
                                 };
             c.AddSecurityRequirement(securityRequirement);
         }); ;
-        var app = builder.Build();
 
+   
+
+        var app = builder.Build();
         // Configure the HTTP request pipeline.
         if (app.Environment.IsDevelopment())
         {
@@ -139,6 +150,7 @@ internal class Program
         app.UseAuthorization();  // ✅ You missed this
 
         app.MapControllers();    // ✅ Endpoints mapping comes after auth middlewares
+        app.UseMiddleware<ExceptionHandlingMiddleware>();
 
         app.Run();
     }

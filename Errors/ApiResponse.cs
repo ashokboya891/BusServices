@@ -18,7 +18,7 @@ namespace BusServcies.Errors
                 400=>"A Bad Request, you have made",
                 401=>"Authorize ,you are not",
                 404=>"Resource found, it was not",
-                500=>"Error are pth to dark side.Errors lead to anger.Anger leads to Hate.Hate leads to carrier change",
+                500=>"Error are path to dark side.Errors lead to anger.Anger leads to Hate.Hate leads to carrier change",
                 _=>null
 
             };

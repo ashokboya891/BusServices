@@ -4,7 +4,7 @@ namespace BusServcies.Errors
     {
         public ApiException(int statusCode, string message = null,string details=null) : base(statusCode, message)
         {
-            Details=details;
+            Details=details??" Internal Server Error";
         }
         public string Details{set;get;}
     }

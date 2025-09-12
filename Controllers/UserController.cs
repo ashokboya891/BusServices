@@ -5,6 +5,7 @@ using BusServcies.Helpers;
 using BusServcies.IServiceContracts;
 using BusServices.Dtos;
 using BusServices.IServiceContracts;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SupplyChain.DTOs;
@@ -12,7 +13,7 @@ using System.Linq;
 
 namespace BusServices.Controllers
 {
-    
+    [Authorize(Roles ="Admin,User")]
     [Route("api/[controller]")]
     [ApiController]
     public class UserController:ControllerBase
