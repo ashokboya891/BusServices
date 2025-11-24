@@ -13,7 +13,9 @@ using System.Linq;
 
 namespace BusServices.Controllers
 {
-    [Authorize(Roles ="Admin,User")]
+    //[Authorize(Roles = "Admin,User")]
+    [Authorize(Policy = "InternalOrAdminUser")] // ✅ Changed from [Authorize(Roles = "Admin,User")]
+
     [Route("api/[controller]")]
     [ApiController]
     public class UserController:ControllerBase
@@ -191,7 +193,7 @@ namespace BusServices.Controllers
 
             return Ok(existingEvent);
         }
-
+        //[Authorize(Policy = "InternalOrAdminUser")] // Method-level override
         [HttpGet("events/{eventId:int}/for-booking")]
         public async Task<IActionResult> GetEventForBooking(int eventId)
         {

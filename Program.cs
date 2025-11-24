@@ -4,6 +4,7 @@ using BusServcies.Middleware;
 using BusServcies.Services;
 using BusServices.IRepositoryContracts;
 using BusServices.IServiceContracts;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -21,7 +22,6 @@ internal class Program
 
         var configuration = builder.Configuration;
 
-
         // Add services to the container.
 
         builder.Services.AddControllers(opt =>
@@ -33,8 +33,6 @@ internal class Program
             options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
         });
 
-
-
         builder.Services.Configure<CloudinarySettings>(builder.Configuration.GetSection("CloudinarySettings"));
 
         builder.Services.AddDbContext<BusServcies.DatabaseContext.ApplicationDbContext>(options =>
@@ -44,14 +42,14 @@ internal class Program
 
         builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
         {
-            var configuration = builder.Configuration.GetConnectionString("Redis"); // 👈 Add in appsettings.json
+            var configuration = builder.Configuration.GetConnectionString("Redis");
             return ConnectionMultiplexer.Connect(configuration);
         });
 
         builder.Services.AddStackExchangeRedisCache(options =>
         {
-            options.Configuration = "localhost:6379"; // Redis server URL
-            options.InstanceName = "BusServcie_"; // Optional prefix for keys
+            options.Configuration = "localhost:6379";
+            options.InstanceName = "BusServcie_";
         });
 
         builder.Host.UseSerilog((HostBuilderContext context, IServiceProvider Service, LoggerConfiguration config) =>
@@ -62,13 +60,12 @@ internal class Program
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
 
-        builder.Services.AddSingleton<BusServcies.IServiceContracts.IResponseCacheService,BusServcies.ServiceContracts.ReponseCacheService>();
+        builder.Services.AddSingleton<BusServcies.IServiceContracts.IResponseCacheService, BusServcies.ServiceContracts.ReponseCacheService>();
         builder.Services.AddScoped<IPhotoService, PhotoService>();
         builder.Services.AddScoped<IEventRepository, BusServices.RepositoryContracts.EventRepository>();
         builder.Services.AddScoped<IEventService, BusServices.ServiceContracts.EventServcie>();
 
-
-        // Add the CORS policy to the application
+        // Add CORS policy
         builder.Services.AddCors(options =>
         {
             options.AddPolicy("AllowSpecificOrigins", policyBuilder =>
@@ -76,17 +73,20 @@ internal class Program
                 policyBuilder.WithOrigins(configuration.GetSection("AllowedOrigins").Get<string[]>())
                              .AllowAnyHeader()
                              .AllowAnyMethod()
-                            .AllowCredentials(); // ✅ REQUIRED for SignalR 
-
-
+                            .AllowCredentials();
             });
         });
-        // Configure JWT authentication
+
+        // ========== INTERNAL AUTHENTICATION SETUP ==========
+
+        // Configure Authentication with Policy Scheme
         builder.Services.AddAuthentication(options =>
         {
-            options.DefaultAuthenticateScheme = "Bearer";
-            options.DefaultChallengeScheme = "Bearer";
-        }).AddJwtBearer("Bearer", options =>
+            options.DefaultAuthenticateScheme = "InternalOrBearer";
+            options.DefaultChallengeScheme = "InternalOrBearer";
+        })
+        // Add JWT Bearer Authentication
+        .AddJwtBearer("Bearer", options =>
         {
             options.TokenValidationParameters = new TokenValidationParameters
             {
@@ -98,6 +98,78 @@ internal class Program
                 ValidAudience = builder.Configuration["Jwt:Audience"],
                 IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
             };
+        })
+        // Add Internal Authentication Handler
+        .AddScheme<AuthenticationSchemeOptions, InternalAuthHandler>("Internal", null)
+        // Add Policy Scheme that decides between Internal and Bearer
+        .AddPolicyScheme("InternalOrBearer", "InternalOrBearer", options =>
+        {
+            options.ForwardDefaultSelector = context =>
+            {
+                // If request has X-Internal-Key header, use Internal scheme
+                if (context.Request.Headers.ContainsKey("X-Internal-Key"))
+                {
+                    return "Internal";
+                }
+                // If request has Authorization header with Bearer, use Bearer scheme
+                if (context.Request.Headers.ContainsKey("Authorization") &&
+                    context.Request.Headers["Authorization"].ToString().StartsWith("Bearer "))
+                {
+                    return "Bearer";
+                }
+                // Otherwise, let both schemes try
+                return "Internal,Bearer";
+            };
+        });
+
+        // Configure Authorization Policies
+        builder.Services.AddAuthorization(options =>
+        {
+            // Policy that allows either Internal service OR users with Admin/User roles
+            options.AddPolicy("InternalOrAdminUser", policy =>
+            {
+                policy.RequireAuthenticatedUser();
+                policy.RequireAssertion(context =>
+                {
+                    // Option 1: Internal service authentication
+                    if (context.User.HasClaim(c => c.Type == "IsInternalService" && c.Value == "true"))
+                    {
+                        return true;
+                    }
+                    // Option 2: JWT authentication with Admin/User roles
+                    if (context.User.IsInRole("Admin") || context.User.IsInRole("User"))
+                    {
+                        return true;
+                    }
+                    return false;
+                });
+            });
+
+            // Additional policies for different role combinations
+            options.AddPolicy("InternalOrAdmin", policy =>
+            {
+                policy.RequireAuthenticatedUser();
+                policy.RequireAssertion(context =>
+                {
+                    if (context.User.HasClaim(c => c.Type == "IsInternalService" && c.Value == "true"))
+                        return true;
+                    if (context.User.IsInRole("Admin"))
+                        return true;
+                    return false;
+                });
+            });
+
+            // Policy for only internal services (no JWT users)
+            options.AddPolicy("InternalOnly", policy =>
+            {
+                policy.RequireAuthenticatedUser();
+                policy.RequireAssertion(context =>
+                {
+                    return context.User.HasClaim(c => c.Type == "IsInternalService" && c.Value == "true");
+                });
+            });
+
+
         });
 
         builder.Services.AddEndpointsApiExplorer();
@@ -115,21 +187,43 @@ internal class Program
                     Type = ReferenceType.SecurityScheme,
                     Id = "Bearer"
                 }
-
             };
             c.AddSecurityDefinition("Bearer", securitySchema);
-            var securityRequirement = new OpenApiSecurityRequirement
-                                {
-                    {
-                        securitySchema,new[] {"Bearer"}
-                    }
-                                };
-            c.AddSecurityRequirement(securityRequirement);
-        }); ;
 
-   
+            var securityRequirement = new OpenApiSecurityRequirement
+            {
+                { securitySchema, new[] { "Bearer" } }
+            };
+            c.AddSecurityRequirement(securityRequirement);
+
+            // Add support for Internal API Key in Swagger
+            c.AddSecurityDefinition("InternalKey", new OpenApiSecurityScheme
+            {
+                Description = "Internal Service API Key",
+                Name = "X-Internal-Key",
+                In = ParameterLocation.Header,
+                Type = SecuritySchemeType.ApiKey,
+                Scheme = "Internal"
+            });
+
+            c.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                {
+                    new OpenApiSecurityScheme
+                    {
+                        Reference = new OpenApiReference
+                        {
+                            Type = ReferenceType.SecurityScheme,
+                            Id = "InternalKey"
+                        }
+                    },
+                    new string[] {}
+                }
+            });
+        });
 
         var app = builder.Build();
+
         // Configure the HTTP request pipeline.
         if (app.Environment.IsDevelopment())
         {
@@ -144,12 +238,53 @@ internal class Program
 
         app.UseRouting();
 
-        app.UseCors("AllowSpecificOrigins"); // Apply CORS policy
+        app.UseCors("AllowSpecificOrigins");
 
-        app.UseAuthentication(); // ✅ Must come before Authorization
-        app.UseAuthorization();  // ✅ You missed this
+        // Enhanced debugging middleware
+        app.Use(async (context, next) =>
+        {
+            Console.WriteLine($"\n=== 🔐 AUTH DEBUG - {context.Request.Method} {context.Request.Path} ===");
 
-        app.MapControllers();    // ✅ Endpoints mapping comes after auth middlewares
+            var hasInternalKey = context.Request.Headers.ContainsKey("X-Internal-Key");
+            var hasAuthHeader = context.Request.Headers.ContainsKey("Authorization");
+
+            Console.WriteLine($"Headers - InternalKey: {hasInternalKey}, AuthHeader: {hasAuthHeader}");
+
+            if (hasInternalKey)
+            {
+                Console.WriteLine($"X-Internal-Key: {context.Request.Headers["X-Internal-Key"]}");
+            }
+            if (hasAuthHeader)
+            {
+                var authHeader = context.Request.Headers["Authorization"].ToString();
+                Console.WriteLine($"Authorization: {authHeader.Substring(0, Math.Min(50, authHeader.Length))}...");
+            }
+
+            await next();
+
+            // After the request, log the auth status
+            Console.WriteLine($"Response Status: {context.Response.StatusCode}");
+            Console.WriteLine($"User Authenticated: {context.User?.Identity?.IsAuthenticated}");
+            Console.WriteLine($"Auth Type: {context.User?.Identity?.AuthenticationType}");
+            Console.WriteLine($"User Name: {context.User?.Identity?.Name}");
+
+            if (context.User?.Identity?.IsAuthenticated == true)
+            {
+                var roles = context.User.Claims
+                    .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role)
+                    .Select(c => c.Value);
+                Console.WriteLine($"User Roles: {string.Join(", ", roles)}");
+
+                var isInternal = context.User.HasClaim(c => c.Type == "IsInternalService");
+                Console.WriteLine($"Is Internal Service: {isInternal}");
+            }
+            Console.WriteLine($"=== END AUTH DEBUG ===\n");
+        });
+
+        app.UseAuthentication();
+        app.UseAuthorization();
+
+        app.MapControllers();
         app.UseMiddleware<ExceptionHandlingMiddleware>();
 
         app.Run();
